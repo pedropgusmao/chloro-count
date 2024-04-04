@@ -1,0 +1,23 @@
+[tool.poetry]
+name = "chloro-count"
+version = "0.1.0"
+description = ""
+authors = ["Pedro Porto Buarque de Gusmão"]
+license = "BSD-3-Clause"
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.10"
+torchvision = "^0.17.2"
+torch = "^2.2.2"
+labelme = "^5.4.1"
+pyqt5-qt5 = "5.15.2"
+pyqt5 = "5.15.10"
+readlif = "^0.6.5"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+
