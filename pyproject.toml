@@ -10,11 +10,13 @@ package-mode = false
 [tool.poetry.dependencies]
 python = "^3.10"
 torchvision = "^0.17.2"
-torch = "^2.2.2"
 labelme = "^5.4.1"
 pyqt5-qt5 = "5.15.2"
 pyqt5 = "5.15.10"
 readlif = "^0.6.5"
+isort = "^5.13.2"
+opencv-python-headless = "^4.9.0.80"
+opencv-python = "^4.10.0.82"
 
 
 [build-system]
