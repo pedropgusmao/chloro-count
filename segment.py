@@ -18,11 +18,11 @@ if __name__ == "__main__":
         help="Path to directory containing all LIF files.",
     )
     parser.add_argument(
-        "--output_dir",
+        "--images_and_segments_dir",
         type=str,
         required=True,
         default="./extracted_images/",
-        help="Directory where images and segmentations will created.",
+        help="Directory where extracted images and segmentations will be stored.",
     )
     parser.add_argument(
         "--dir_models",
@@ -40,7 +40,7 @@ if __name__ == "__main__":
     )
     args = parser.parse_args()
     lifs_dir = Path(args.lif_dir)
-    extraction_dir = Path(args.output_dir)
+    extraction_dir = Path(args.images_and_segments_dir)
     dir_models = Path(args.dir_models)
 
     threshold_dict = {
@@ -57,12 +57,16 @@ if __name__ == "__main__":
                 )
 
     # Segment all cells in the extracted images
-    for path_to_model in dir_models.iterdir():
-        if path_to_model.suffix == ".pth":
-            label = path_to_model.stem
-            segment_cells(
-                extraction_dir=extraction_dir,
-                model_path=path_to_model,
-                threshold_dict=threshold_dict,
-                label=label,
-            )
+    segment_cells(
+        extraction_dir=extraction_dir,
+        model_path=(dir_models / "chloroplast.pth"),
+        threshold_dict=threshold_dict,
+        label="chloroplast",
+    )
+    segment_cells(
+        extraction_dir=extraction_dir,
+        model_path=dir_models / Path("bundle_sheath.pth"),
+        threshold_dict=threshold_dict,
+        label="bundle sheath",
+        append_annotations=True,
+    )

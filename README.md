@@ -69,7 +69,7 @@ The above command will create folders with the following structure `extracted_ce
 
 ## Manual Adjustment
 
-The previous steps will have generate the segmentations for both *bundle sheath cells* and *chloroplasts*.
+The previous steps generated the segmentations for both *bundle sheath cells* and *chloroplasts*, now it is time to validate the proposed segments.
 Use [LabelMe](https://github.com/labelmeai/labelme), already installed as one of the project's dependencies, to adjust correct imperfect annotations.
 
 ```shell

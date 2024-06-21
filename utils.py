@@ -21,6 +21,80 @@ MIN_SCORE_CHLORO = 0.0
 MIN_SEG_BUNDLE = 0.2
 
 
+class InstanceObj:
+    def __init__(
+        self,
+        *,
+        class_label: str,
+        instance_id: int,
+        num_slices: int,
+        current_slice: int = 0,
+    ):
+        self.class_label: str = class_label
+        self.instance_id: int = instance_id
+        self.num_slices: int = num_slices
+        self.current_slice = current_slice
+        self.list_segments: List[npt.NDArray] = [[] for _ in range(num_slices)]
+
+    def append_segment(self, segment: npt.NDArray):
+        self.list_segments[self.current_slice] = segment
+        self.current_slice += 1
+
+    def get_latest_segment(self) -> npt.NDArray:
+        latest_segment = self.list_segments[0]
+        for idx in reversed(range(self.num_slices)):
+            latest_segment = self.list_segments[idx]
+            if len(latest_segment) != 0:
+                break
+
+        return latest_segment
+
+    def get_instance_id(self) -> int:
+        return self.instance_id
+
+    def close(self):
+        num_current_slices = len(self.list_segments)
+        for j in range(num_current_slices, self.num_slices):
+            self.list_segments.append([])
+
+
+def save_instance_segmentation_json(
+    path_original_annotations, path_instance_annotations, total_dict
+):
+    num_slices = len(list(path_original_annotations.glob("*.json")))
+    for slice_idx in range(0, num_slices):
+        # Get original image information:
+        json_original = path_original_annotations / f"{slice_idx}.json"
+        with open(json_original, "r") as f:
+            original_data = json.load(f)
+
+        json_instance = path_instance_annotations / f"{slice_idx}.json"
+        all_points = []
+        for instance_id, instance in total_dict.items():
+            point_list = instance.list_segments[slice_idx]
+            if len(point_list):
+                inner_dict = {
+                    "label": f"{instance_id}",
+                    "points": point_list.tolist(),
+                    "group_id": None,
+                    "shape_type": "polygon",
+                    "flags": {},
+                }
+                all_points.append(inner_dict)
+        out_dict = {
+            "version": "5.0.1",
+            "flags": {},
+            "shapes": all_points,
+            "imagePath": original_data["imagePath"],
+            "imageData": original_data["imageData"],
+            "imageHeight": 512,
+            "imageWidth": 512,
+        }
+
+        with open(json_instance, "w") as f:
+            json.dump(out_dict, f, ensure_ascii=False, indent=2)
+
+
 def save_json_file(
     img_path,
     json_path,
@@ -29,29 +103,36 @@ def save_json_file(
     append: bool = False,
 ):
     all_points = []
-    write_flag = "w" if not append else "a"
-    for pred in list_predictions:
-        pred_squeeze = np.squeeze(pred)
-        pred_bin = np.zeros(pred_squeeze.shape)
-        pred_bin[np.where(pred_squeeze > 0.1)] = 255
-        contours, _ = cv2.findContours(
-            pred_bin.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_L1
-        )
-        for c in contours:  # There should be just one per prediction already
-            if c.shape[0] > 5:
-                point_list = c[:, 0, :].astype(np.float32)
-                if point_list.shape[0] > 20:
-                    point_list = point_list[0::2]
-                if point_list.shape[0] > 20:
-                    point_list = point_list[0::2]
-                inner_dict = {
-                    "label": label,
-                    "points": point_list.tolist(),
-                    "group_id": None,
-                    "shape_type": "polygon",
-                    "flags": {},
-                }
-                all_points.append(inner_dict)
+    # If append and json_path exists, load the json file and append the new predictions
+    list_predictions_and_labels = [(list_predictions, label)]
+    if append and json_path.exists():
+        with open(json_path, "r") as f:
+            tmp_json = json.load(f)
+            all_points += tmp_json["shapes"]
+
+    for list_predictions, label in list_predictions_and_labels:
+        for pred in list_predictions:
+            pred_squeeze = np.squeeze(pred)
+            pred_bin = np.zeros(pred_squeeze.shape)
+            pred_bin[np.where(pred_squeeze > 0.1)] = 255
+            contours, _ = cv2.findContours(
+                pred_bin.astype(np.uint8), cv2.RETR_TREE, cv2.CHAIN_APPROX_TC89_L1
+            )
+            for c in contours:  # There should be just one per prediction already
+                if c.shape[0] > 5:
+                    point_list = c[:, 0, :].astype(np.float32)
+                    if point_list.shape[0] > 20:
+                        point_list = point_list[0::2]
+                    if point_list.shape[0] > 20:
+                        point_list = point_list[0::2]
+                    inner_dict = {
+                        "label": label,
+                        "points": point_list.tolist(),
+                        "group_id": None,
+                        "shape_type": "polygon",
+                        "flags": {},
+                    }
+                    all_points.append(inner_dict)
 
     img = labelme.LabelFile.load_image_file(img_path)
     if img is not None:
@@ -65,7 +146,7 @@ def save_json_file(
             "imageHeight": 512,
             "imageWidth": 512,
         }
-        with open(json_path, write_flag) as f:
+        with open(json_path, "w") as f:
             json.dump(out_dict, f, ensure_ascii=False, indent=2)
 
 
@@ -151,16 +232,16 @@ def clean_min_score(
     prediction_masks: npt.NDArray,
     prediction_scores: npt.NDArray,
     score_threshold: float = MIN_SCORE_CHLORO,
-) -> npt.ArrayLike:
+) -> npt.NDArray:
     good_segmentations = prediction_scores >= score_threshold
     return prediction_masks[good_segmentations]
 
 
 def filter_across_planes(
-    slices_in_cell: List[Tuple[npt.ArrayLike, npt.ArrayLike]],
+    slices_in_cell: List[Tuple[npt.NDArray, npt.NDArray]],
     score_threshold: float,
     non_max_supp_threshold: float,
-):
+) -> List[npt.NDArray]:
     # Filter predictions based on prediction scores
     predictions_filt_score = [
         clean_min_score(pred, score, score_threshold=score_threshold)
@@ -182,6 +263,7 @@ def segment_single_cell(
     device: torch.device,
     thresholds: Dict[str, float],
     label: str = "chloroplast",
+    append_annotations: bool = False,
 ):
     images_dir = cell_dir / "images"
     slices_in_cell = []
@@ -208,9 +290,134 @@ def segment_single_cell(
     json_dir.mkdir(parents=True, exist_ok=True)
     for idx, image_path in enumerate(sorted(images_dir.iterdir())):
         json_path = json_dir / f"{image_path.stem}.json"
-        save_json_file(image_path, json_path, filtered_segments[idx], label=label)
+        save_json_file(
+            image_path,
+            json_path,
+            filtered_segments[idx],
+            label=label,
+            append=append_annotations,
+        )
 
     return filtered_segments
+
+
+def get_segments_from_labelme_json(json_file: Path, class_label: str) -> npt.NDArray:
+    """Extracts segments from a labelme json file
+
+    Args:
+        json_file (Path): Complete path to json file containing labelme segments.
+        class_label (str): Specific label of segments to be extracted.
+
+    Returns:
+        ArrayLike:
+    """
+    list_segments = []
+    with open(json_file, "r") as f:
+        data = json.load(f)
+        for segment in data["shapes"]:
+            if segment["label"] == class_label:
+                contours = np.array(segment["points"], dtype=np.int32)
+                list_segments.append(contours)
+    return list_segments
+
+
+def distance_segment_instances_with_id(segment_centers, instances_centers):
+    dist_matrix = np.zeros(shape=(len(segment_centers), len(instances_centers)))
+    # Create matrix
+    for i, Ps in enumerate(segment_centers):
+        Ps = np.array(list(Ps))
+        for j, Pc in enumerate(instances_centers):
+            Pc = np.array(list(Pc))
+            dist_matrix[i, j] = np.linalg.norm(Ps - Pc)
+
+    return dist_matrix
+
+
+def get_center_from_poly(poly_seg: npt.NDArray) -> Tuple[float, float]:
+    M = cv2.moments(poly_seg)
+    cX = M["m10"] / M["m00"]
+    cY = M["m01"] / M["m00"]
+    return (cX, cY)
+
+
+def get_centers_from_seg(list_segments: List[npt.NDArray]) -> List[Tuple[float, float]]:
+    list_centers = []
+    for poly_seg in list_segments:
+        cX, cY = get_center_from_poly(poly_seg)
+        list_centers.append((cX, cY))
+    return list_centers
+
+
+def get_centers_from_instance_objects(
+    instance_objs: List[InstanceObj],
+) -> List[Tuple[float, float]]:
+    list_centers = []
+    for instance in instance_objs:
+        latest_poly_seg = instance.get_latest_segment()
+        list_centers.append(get_center_from_poly(latest_poly_seg))
+    return list_centers
+
+
+def associate_segments(
+    segments: List[npt.NDArray], instances: List[InstanceObj], dist_th: float
+):
+    associated_instances = []
+    while segments and instances:
+        segments_centers = get_centers_from_seg(segments)
+        instances_centers = get_centers_from_instance_objects(instances)
+        D = distance_segment_instances_with_id(segments_centers, instances_centers)
+        min_dist = np.amin(D)
+        if min_dist < dist_th:
+            x, y = np.where(D == min_dist)
+            this_segment = segments.pop(int(x[0]))
+            this_instance = instances.pop(int(y[0]))
+            this_instance.append_segment(this_segment)
+            associated_instances.append(this_instance)
+        else:
+            break
+    remaining_segments = segments
+
+    return associated_instances, remaining_segments
+
+
+def update_instance_dict(
+    instances_dict, remaining_segments, class_label, num_slices, current_slice
+):
+    num_current_instances = len(instances_dict)
+    new_instances = []
+    for idx, segment in enumerate(remaining_segments):
+        instance = InstanceObj(
+            class_label=class_label,
+            instance_id=idx + num_current_instances,
+            num_slices=num_slices,
+            current_slice=current_slice,
+        )
+        instance.append_segment(segment)
+        k = f"{class_label}_{instance.instance_id}"
+        instances_dict[k] = instance
+        new_instances.append(instance)
+
+    return instances_dict, new_instances
+
+
+def process_instance_seg_for_class(json_dir: Path, class_label: str, max_dist: float):
+    instances_dict = {}
+    num_slices = len(list(json_dir.glob("*.json")))
+    previous_instances = []
+    for slice_idx in range(num_slices):
+        print(slice_idx)
+        json_file = json_dir / f"{slice_idx}.json"
+        current_segs = get_segments_from_labelme_json(
+            json_file, class_label=class_label
+        )
+        associated_instances, remaining_segments = associate_segments(
+            segments=current_segs, instances=previous_instances, dist_th=max_dist
+        )
+        instances_dict, new_instances = update_instance_dict(
+            instances_dict, remaining_segments, class_label, num_slices, slice_idx
+        )
+        previous_instances = associated_instances + new_instances
+    return instances_dict
 
 
 def segment_cells(
@@ -218,6 +425,7 @@ def segment_cells(
     model_path: Path,
     threshold_dict: Dict[str, float],
     label: str = "chloroplast",
+    append_annotations=True,
 ):
     # Use CUDA if available
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -233,11 +441,44 @@ def segment_cells(
         for lif_dir in extraction_dir.iterdir():
             for cell_dir in lif_dir.iterdir():
                 output_predictions = segment_single_cell(
-                    cell_dir, model, device, threshold_dict, label=label
+                    cell_dir,
+                    model,
+                    device,
+                    threshold_dict,
+                    label=label,
+                    append_annotations=append_annotations,
                 )
             # output_predictions.save(cell_dir / "masks" / f"{image_path.stem}.png")
 
     return output_predictions
+
+
+def instance_association(extraction_dir: Path, dist_dict: Dict[str, float]):
+    for lif_dir in extraction_dir.iterdir():
+        for cell_dir in lif_dir.iterdir():
+            if cell_dir.is_dir():
+                path_instance_annotations = cell_dir / "instance_annotations"
+                path_instance_annotations.mkdir(exist_ok=True, parents=True)
+                try:
+                    path_adjusted_annotations = cell_dir / "annotations"
+                    instances_dict_chloro = process_instance_seg_for_class(
+                        path_adjusted_annotations,
+                        class_label="chloroplast",
+                        max_dist=dist_dict["chloroplast"],
+                    )
+                    instances_dict_bundle = process_instance_seg_for_class(
+                        path_adjusted_annotations,
+                        class_label="bundle sheath",
+                        max_dist=dist_dict["bundle sheath"],
+                    )
+                    total_dict = {**instances_dict_chloro, **instances_dict_bundle}
+                    save_instance_segmentation_json(
+                        path_adjusted_annotations, path_instance_annotations, total_dict
+                    )
+
+                except Exception as e:
+                    print(f"Error with {cell_dir}")
+                    print(e)
 
 
 if __name__ == "__main__":
@@ -250,12 +491,24 @@ if __name__ == "__main__":
     extraction_dir = Path("./extracted_images")
     for lif_path in lifs_dir.iterdir():
         if lif_path.suffix == ".lif":
-            extract_images_and_scales_from_lif(lif_path, extraction_root=extraction_dir)
+            # extract_images_and_scales_from_lif(lif_path, extraction_root=extraction_dir)
+            pass
 
     # Segment all cells in the extracted images
-    segment_cells(
+    """segment_cells(
         extraction_dir=extraction_dir,
-        model_path=Path("./models/chloroplasts.pth"),
+        model_path=Path("./models/chloroplast.pth"),
         threshold_dict=threshold_dict,
         label="chloroplast",
     )
+    segment_cells(
+        extraction_dir=extraction_dir,
+        model_path=Path("./models/bundle_sheath.pth"),
+        threshold_dict=threshold_dict,
+        label="bundle sheath",
+        append_annotations=True,
+    )"""
+
+    # Instance segmentation for chloroplasts
+    dist_dict = {"chloroplast": 10.0, "bundle sheath": 100.0}
+    instance_association(Path("./extracted_images_clean"), dist_dict)
