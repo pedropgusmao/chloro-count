@@ -40,14 +40,14 @@ Throughout this tutorial, we will be using the `.lif` file available [here](http
 Use the command below to generate the initial segmentations for either *chloroplasts* or *bundle sheath cells*.
 
 ```console
-python segment.py --lif_dir LIF_DIR --output_dir OUTPUT_DIR --path_to_model PATH_TO_MODEL
+python segment.py --lif_dir LIFS_DIR --skip_image_extraction SKIP_IMAGE_EXTRACTION --models_dir PATH_TO_MODEL
 ``` 
 
 where: 
 ```
-LIF_DIR is the path to directory containing all LIF files.
-OUTPUT_DIR is the directory where images and segmentations will created.
-DIR_MODELS is the directory containing both models used for segmentation (chloroplasts and bundle sheath cell). Notice that the name of the model will define the segments' labels.
+LIFS_DIR is the path to directory containing all LIF files.
+IMAGES_AND_SEGMENTS_DIR is the directory where images and segmentations will created.
+MODELS_DIR is the directory containing both models used for segmentation (chloroplasts and bundle sheath cell). Notice that the name of the model will define the segments' labels.
 ```
 You also have the option of append the `--skip_image_extraction` flag to skip the image extraction step and just regenerate segmentations. This is useful when you just want to try another segmentation model
 
@@ -67,23 +67,61 @@ The above command will create folders with the following structure `extracted_ce
 - **images:** Folder containing original images extracted from lif files. One for each slice.
 
 
+
 ## Manual Adjustment
 
-The previous steps generated the segmentations for both *bundle sheath cells* and *chloroplasts*, now it is time to validate the proposed segments.
-Use [LabelMe](https://github.com/labelmeai/labelme), already installed as one of the project's dependencies, to adjust correct imperfect annotations.
+The previous step will produce segmentation regions for both *bundle sheath cells* and *chloroplasts*. You can visualize these regions using [LabelMe](https://github.com/labelmeai/labelme), already installed as one of the project's dependencies.
+
+Open a terminal an run the following command:
 
 ```shell
-labelme extracted_images/2314510\#7/Series002/images -O extracted_images/2314510\#7/Series002/annotations
+labelme extracted_images/2314510\#7/Series023/images -O extracted_images/2314510\#7/Series023/annotations
 ```
 
+This should open LabelMe and show you the initial segmentation.
 
 <p align="center">
-  <img src="initial_segment.png" width="50%" alt="LabelMe interface for image segmentation"/>
+  <img src="initial_segmentations.jpg" width="50%" alt="LabelMe interface for image segmentation"/>
 </p>
+
+
+In order to obtain the correct volumes estimations, make sure to adjust the proposed annotations, saving each slice as you progress.
+
+After having made the required adjustments, your screen should look like the following:
+
+<p align="center">
+  <img src="corrected_segmentations.jpg" width="50%" alt="LabelMe interface for image segmentation"/>
+</p>
+
 
 
 ## Extract metrics
 
 Once all segments have been validated, run the following command to generate the measure the volume of each chloroplast and bundle sheath cell. The command will generate one `.csv`file per cell.
 
+```shell
+python associate_and_measure.py  --images_and_segments_dir IMAGES_AND_SEGMENTS_DIR
+``` 
 
+where again `IMAGES_AND_SEGMENTS_DIR` is the directory where images and segmentation were created.
+
+Again, if you need help running the command,  just use the `--help` flag.
+
+```shell
+python associate_and_measure.py --help
+``` 
+
+The `associate_and_measure.py` will identify slices of a same chloroplast and bundle sheath within a cell, allowing the correct estimation of volumes.
+
+This instance level association is saved under `instance_annotations`folder. You can verify them by running:
+
+
+```shell
+labelme extracted_images/2314510\#7/Series023/images -O extracted_images/2314510\#7/Series023/instance_annotations
+```
+
+<p align="center">
+  <img src="instance_association.jpg" width="50%" alt="LabelMe interface for image segmentation"/>
+</p>
+
+Finally, a `volumes.txt` file containing the volumes for each cell will be generated inside each cell's folder. 
