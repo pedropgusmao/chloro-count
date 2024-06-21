@@ -453,9 +453,36 @@ def segment_cells(
     return output_predictions
 
 
+def save_instances_volumes(volumes_dict, path_to_cell):
+    path_to_file = path_to_cell / "volumes.txt"
+    with open(path_to_file, "w") as f:
+        for k, v in volumes_dict.items():
+            f.write(f"{k},{v}\n")
+
+
+def calculate_volume_from_instances(instance_dict, scales):
+    volume_dict = {}
+    dx, dy, dz = scales
+    for instance_id, instance in instance_dict.items():
+        total_area = 0.0
+        for cnt in instance.list_segments:
+            if len(cnt) != 0:  # considers continuous
+                total_area += cv2.contourArea(cnt) * dx * dy
+        volume_dict[instance_id] = total_area * dz
+
+    return volume_dict
+
+
+def get_scale_from_lif_file(path_to_scales_csv: Path):
+    with open(path_to_scales_csv, "r") as f:
+        x_px_um, y_px_um, z_px_um = f.read().split(",")
+    return (1.0 / float(x_px_um), 1.0 / float(y_px_um), abs(1.0 / float(z_px_um)))
+
+
 def instance_association(extraction_dir: Path, dist_dict: Dict[str, float]):
     for lif_dir in extraction_dir.iterdir():
         for cell_dir in lif_dir.iterdir():
+            scales = get_scale_from_lif_file(cell_dir / "scale.csv")
             if cell_dir.is_dir():
                 path_instance_annotations = cell_dir / "instance_annotations"
                 path_instance_annotations.mkdir(exist_ok=True, parents=True)
@@ -475,6 +502,8 @@ def instance_association(extraction_dir: Path, dist_dict: Dict[str, float]):
                     save_instance_segmentation_json(
                         path_adjusted_annotations, path_instance_annotations, total_dict
                     )
+                    volumes_dict = calculate_volume_from_instances(total_dict, scales)
+                    save_instances_volumes(volumes_dict, cell_dir)
 
                 except Exception as e:
                     print(f"Error with {cell_dir}")
